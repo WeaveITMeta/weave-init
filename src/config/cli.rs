@@ -60,10 +60,9 @@ pub struct InitArgs {
     #[arg(long, short = 'o')]
     pub output: Option<PathBuf>,
 
-    /// Run `bun install` automatically after scaffolding.
-    /// Off by default — large projects can take several minutes to install.
+    /// Skip running `bun install` after scaffolding
     #[arg(long)]
-    pub install: bool,
+    pub skip_install: bool,
 
     /// Skip initializing a git repository in the new project
     #[arg(long)]

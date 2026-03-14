@@ -108,59 +108,46 @@ fn rewrite_package_json(
         .collect();
 
     if !workspaces.is_empty() {
-        package["workspaces"] = serde_json::Value::Array(workspaces);
+        package["workspaces"] = serde_json::Value::Array(workspaces.clone());
+    } else {
+        // No workspace packages — remove the workspaces field entirely
+        package.as_object_mut().map(|obj| obj.remove("workspaces"));
     }
 
-    // Add manifest-defined dependencies (for example, firebase, @aws-sdk/client-dynamodb)
-    let (extra_deps, extra_dev_deps) = manifest.collect_dependencies(&selections.selections);
-    if !extra_deps.is_empty() {
-        let deps_obj = package
-            .as_object_mut()
-            .unwrap()
-            .entry("dependencies")
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        if let Some(deps_map) = deps_obj.as_object_mut() {
-            for dep in &extra_deps {
-                // Format: "package_name" or "package_name@version"
-                let (name, version) = if let Some(at_pos) = dep.rfind('@') {
-                    if at_pos == 0 {
-                        // Scoped package like @aws-sdk/client-dynamodb — no version
-                        (dep.as_str(), "latest")
-                    } else {
-                        (&dep[..at_pos], &dep[at_pos + 1..])
-                    }
-                } else {
-                    (dep.as_str(), "latest")
-                };
-                deps_map
-                    .entry(name)
-                    .or_insert_with(|| serde_json::Value::String(version.to_string()));
-            }
-        }
+    // Filter dependencies to only packages needed by the user's selections.
+    // 1. Collect all package names declared by selected manifest entries
+    // 2. Add essential base packages that every project needs
+    // 3. Remove everything else from dependencies and devDependencies
+    let (manifest_deps, manifest_dev_deps) = manifest.collect_dependencies(&selections.selections);
+    let mut needed_deps: HashSet<String> = manifest_deps.iter().map(|d| extract_package_name(d)).collect();
+    let mut needed_dev_deps: HashSet<String> = manifest_dev_deps.iter().map(|d| extract_package_name(d)).collect();
+
+    // Base packages every Weave project needs regardless of selections
+    let base_deps: &[&str] = &[
+        "class-variance-authority", "clsx", "tailwind-merge", "lucide-react",
+    ];
+    let base_dev_deps: &[&str] = &[
+        "typescript", "concurrently", "cross-env", "dotenv",
+        "autoprefixer", "postcss", "tailwindcss",
+    ];
+    for dep in base_deps {
+        needed_deps.insert(dep.to_string());
     }
-    if !extra_dev_deps.is_empty() {
-        let dev_deps_obj = package
-            .as_object_mut()
-            .unwrap()
-            .entry("devDependencies")
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        if let Some(dev_deps_map) = dev_deps_obj.as_object_mut() {
-            for dep in &extra_dev_deps {
-                let (name, version) = if let Some(at_pos) = dep.rfind('@') {
-                    if at_pos == 0 {
-                        (dep.as_str(), "latest")
-                    } else {
-                        (&dep[..at_pos], &dep[at_pos + 1..])
-                    }
-                } else {
-                    (dep.as_str(), "latest")
-                };
-                dev_deps_map
-                    .entry(name)
-                    .or_insert_with(|| serde_json::Value::String(version.to_string()));
-            }
-        }
+    for dep in base_dev_deps {
+        needed_dev_deps.insert(dep.to_string());
     }
+
+    // Also keep any @types/* packages that correspond to a kept dependency
+    // and add workspace package dependencies from their own package.json files
+    scan_workspace_dependencies(project_dir, &workspaces, &mut needed_deps, &mut needed_dev_deps);
+
+    // Filter the root dependencies — remove packages not in the needed set
+    filter_dependency_map(&mut package, "dependencies", &needed_deps);
+    filter_dependency_map(&mut package, "devDependencies", &needed_dev_deps);
+
+    // Remove resolutions/overrides for packages that are no longer needed
+    filter_dependency_map(&mut package, "resolutions", &needed_deps);
+    filter_dependency_map(&mut package, "overrides", &needed_deps);
 
     // Rewrite scripts to use bun instead of pnpm
     if let Some(scripts) = package.get_mut("scripts").and_then(|s| s.as_object_mut()) {
@@ -365,4 +352,120 @@ fn initialize_git(project_dir: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Extract the package name from a dependency string.
+/// Handles plain names ("react"), scoped names ("@aws-sdk/client-dynamodb"),
+/// and name@version ("react@18.2.0") formats.
+fn extract_package_name(dep: &str) -> String {
+    // Scoped packages: @scope/name or @scope/name@version
+    if dep.starts_with('@') {
+        // Find the second '@' (version separator) after the scope
+        if let Some(slash_pos) = dep.find('/') {
+            if let Some(at_pos) = dep[slash_pos..].find('@') {
+                return dep[..slash_pos + at_pos].to_string();
+            }
+        }
+        return dep.to_string();
+    }
+    // Unscoped: name or name@version
+    if let Some(at_pos) = dep.find('@') {
+        dep[..at_pos].to_string()
+    } else {
+        dep.to_string()
+    }
+}
+
+/// Filter a dependency map in package.json to only keep packages in the allowed set.
+/// If the map becomes empty, removes the key entirely.
+fn filter_dependency_map(
+    package: &mut serde_json::Value,
+    field: &str,
+    allowed: &HashSet<String>,
+) {
+    if let Some(deps) = package.get_mut(field).and_then(|d| d.as_object_mut()) {
+        let all_keys: Vec<String> = deps.keys().cloned().collect();
+        let before = all_keys.len();
+        for key in all_keys {
+            if !allowed.contains(&key) {
+                deps.remove(&key);
+            }
+        }
+        let after = deps.len();
+        tracing::info!("Filtered {}: {} -> {} packages", field, before, after);
+    }
+    // Remove the field entirely if empty
+    if package
+        .get(field)
+        .and_then(|d| d.as_object())
+        .map(|o| o.is_empty())
+        .unwrap_or(false)
+    {
+        package.as_object_mut().map(|obj| obj.remove(field));
+    }
+}
+
+/// Scan workspace package.json files to discover their dependencies.
+/// These need to be kept in the root to avoid resolution failures.
+fn scan_workspace_dependencies(
+    project_dir: &Path,
+    workspaces: &[serde_json::Value],
+    needed_deps: &mut HashSet<String>,
+    needed_dev_deps: &mut HashSet<String>,
+) {
+    for workspace in workspaces {
+        if let Some(ws_path) = workspace.as_str() {
+            let ws_package_json = project_dir.join(ws_path).join("package.json");
+            if let Ok(content) = std::fs::read_to_string(&ws_package_json) {
+                if let Ok(ws_pkg) = serde_json::from_str::<serde_json::Value>(&content) {
+                    // Collect dependency names from workspace packages
+                    if let Some(deps) = ws_pkg.get("dependencies").and_then(|d| d.as_object()) {
+                        for key in deps.keys() {
+                            // Skip workspace references (packages starting with @nexpo/ etc.)
+                            if !key.starts_with("@nexpo/") && !key.starts_with("@taurte/") {
+                                needed_deps.insert(key.clone());
+                            }
+                        }
+                    }
+                    if let Some(deps) = ws_pkg.get("devDependencies").and_then(|d| d.as_object()) {
+                        for key in deps.keys() {
+                            needed_dev_deps.insert(key.clone());
+                        }
+                    }
+                    if let Some(deps) = ws_pkg.get("peerDependencies").and_then(|d| d.as_object()) {
+                        for key in deps.keys() {
+                            needed_deps.insert(key.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // For any kept dependency, also keep its @types/* counterpart
+    let type_packages: Vec<String> = needed_deps
+        .iter()
+        .filter(|dep| !dep.starts_with('@'))
+        .map(|dep| format!("@types/{}", dep))
+        .collect();
+    for tp in type_packages {
+        needed_dev_deps.insert(tp);
+    }
+}
+
+/// Determine the localhost URL for the user's selected platform
+pub fn platform_dev_url(selections: &UserSelections) -> Option<(&'static str, &'static str)> {
+    let platform = selections
+        .selections
+        .get("platforms")
+        .and_then(|v| v.first())
+        .map(|s| s.as_str());
+
+    match platform {
+        Some("nexpo-web") | Some("nexpo-full") => Some(("http://localhost:3000", "next")),
+        Some("nexpo-mobile") => Some(("http://localhost:19000", "expo")),
+        Some("taurte-web") | Some("taurte-full") => Some(("http://localhost:5173", "svelte")),
+        Some("taurte-mobile") | Some("desktop") => Some(("http://localhost:1420", "tauri")),
+        _ => None,
+    }
 }

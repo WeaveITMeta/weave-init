@@ -120,7 +120,7 @@ async fn run_init(args: InitArgs) -> Result<()> {
         &project_dir,
         &manifest,
         &selections,
-        args.install,
+        args.skip_install,
         args.skip_git,
         scaffolded_into_current_directory,
     )?;
@@ -281,13 +281,13 @@ fn run_wizard(
     Ok(app.selections)
 }
 
-/// Execute the scaffolding process: copy template, prune, generate configs.
+/// Execute the scaffolding process: copy template, prune, generate configs, install, launch.
 fn run_scaffold(
     template_path: &std::path::Path,
     project_dir: &std::path::Path,
     manifest: &core::manifest::WeaveManifest,
     selections: &core::selections::UserSelections,
-    run_install: bool,
+    skip_install: bool,
     skip_git: bool,
     in_current_directory: bool,
 ) -> Result<()> {
@@ -313,38 +313,44 @@ fn run_scaffold(
     println!("Generating configuration files...");
     generator::post_scaffold(project_dir, manifest, selections, skip_git)?;
 
-    // Step 5: Run bun install (only if --install flag was passed)
-    if run_install {
-        println!("Running bun install...");
-        let install_status = std::process::Command::new("bun")
-            .arg("install")
-            .current_dir(project_dir)
-            .status();
+    // Step 5: Run bun install (unless skipped)
+    let install_succeeded = if !skip_install {
+        println!("Installing dependencies...");
+        run_bun_install(project_dir)
+    } else {
+        false
+    };
 
-        match install_status {
-            Ok(status) if status.success() => {
-                println!("Dependencies installed successfully.");
-            }
-            Ok(status) => {
-                eprintln!(
-                    "Warning: bun install exited with status {}. You may need to run it manually.",
-                    status
-                );
-            }
-            Err(error) => {
-                eprintln!(
-                    "Warning: Could not run bun install ({}). Make sure bun is installed, then run: cd {} && bun install",
-                    error,
-                    project_dir.display()
-                );
-            }
-        }
-    }
-
-    // Success output
+    // Step 6: Success output
     println!();
     println!("  Project scaffolded successfully!");
     println!("  {}", project_dir.display());
+
+    // Step 7: Auto-launch dev server if install succeeded
+    let dev_info = generator::platform_dev_url(selections);
+    if install_succeeded {
+        if let Some((url, script_name)) = dev_info {
+            println!();
+            println!("  Launching dev server...");
+            println!("  Opening {} in your browser", url);
+            println!();
+
+            // Open the browser first (non-blocking)
+            open_browser(url);
+
+            // Launch bun dev (replaces this process — never returns)
+            let _ = std::process::Command::new("bun")
+                .arg("run")
+                .arg(script_name)
+                .current_dir(project_dir)
+                .status();
+
+            // If we get here, dev server exited
+            return Ok(());
+        }
+    }
+
+    // Fallback: show next steps if we didn't auto-launch
     println!();
     println!("  Next steps:");
     let mut step = 1;
@@ -354,17 +360,102 @@ fn run_scaffold(
     }
     println!("    {}. Copy .env.example to .env and fill in your keys", step);
     step += 1;
-    if !run_install {
+    if skip_install {
         println!("    {}. bun install", step);
         step += 1;
     }
-    println!("    {}. bun dev", step);
+    if let Some((url, _)) = dev_info {
+        println!("    {}. bun dev  (opens {})", step, url);
+    } else {
+        println!("    {}. bun dev", step);
+    }
     println!();
     println!(
         "  Your selections are saved in weave.toml for reproducibility."
     );
 
     Ok(())
+}
+
+/// Run `bun install` and return true if it succeeded.
+/// Uses a timeout to prevent hanging forever.
+fn run_bun_install(project_dir: &std::path::Path) -> bool {
+    let mut child = match std::process::Command::new("bun")
+        .arg("install")
+        .current_dir(project_dir)
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            eprintln!(
+                "  Warning: Could not run bun install ({}).",
+                error
+            );
+            eprintln!(
+                "  Make sure bun is installed, then run: cd {} && bun install",
+                project_dir.display()
+            );
+            return false;
+        }
+    };
+
+    // Wait up to 5 minutes for bun install to complete
+    let timeout = std::time::Duration::from_secs(300);
+    let start = std::time::Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success() {
+                    println!("  Dependencies installed successfully.");
+                    return true;
+                } else {
+                    eprintln!(
+                        "  Warning: bun install exited with status {}.",
+                        status
+                    );
+                    return false;
+                }
+            }
+            Ok(None) => {
+                // Still running — check timeout
+                if start.elapsed() > timeout {
+                    eprintln!("  Warning: bun install timed out after 5 minutes. Killing process.");
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    eprintln!("  Run `bun install` manually to complete setup.");
+                    return false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            Err(error) => {
+                eprintln!("  Warning: Error waiting for bun install: {}", error);
+                return false;
+            }
+        }
+    }
+}
+
+/// Open a URL in the system's default browser
+fn open_browser(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", url])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg(url)
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn();
+    }
 }
 
 /// Execute the `weave update` command — refresh the cached template
