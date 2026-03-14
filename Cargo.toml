@@ -8,8 +8,9 @@ license = "MIT"
 repository = "https://github.com/WeaveITMeta/Weave-CLI"
 homepage = "https://github.com/WeaveITMeta/Weave-CLI"
 readme = "README.md"
-keywords = ["cli", "scaffold", "template", "fullstack", "ratatui"]
+keywords = ["cli", "scaffold", "fullstack", "monorepo", "ratatui"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = [".github/", "target/"]
 
 [[bin]]
 name = "weave"
