@@ -111,6 +111,57 @@ fn rewrite_package_json(
         package["workspaces"] = serde_json::Value::Array(workspaces);
     }
 
+    // Add manifest-defined dependencies (for example, firebase, @aws-sdk/client-dynamodb)
+    let (extra_deps, extra_dev_deps) = manifest.collect_dependencies(&selections.selections);
+    if !extra_deps.is_empty() {
+        let deps_obj = package
+            .as_object_mut()
+            .unwrap()
+            .entry("dependencies")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        if let Some(deps_map) = deps_obj.as_object_mut() {
+            for dep in &extra_deps {
+                // Format: "package_name" or "package_name@version"
+                let (name, version) = if let Some(at_pos) = dep.rfind('@') {
+                    if at_pos == 0 {
+                        // Scoped package like @aws-sdk/client-dynamodb — no version
+                        (dep.as_str(), "latest")
+                    } else {
+                        (&dep[..at_pos], &dep[at_pos + 1..])
+                    }
+                } else {
+                    (dep.as_str(), "latest")
+                };
+                deps_map
+                    .entry(name)
+                    .or_insert_with(|| serde_json::Value::String(version.to_string()));
+            }
+        }
+    }
+    if !extra_dev_deps.is_empty() {
+        let dev_deps_obj = package
+            .as_object_mut()
+            .unwrap()
+            .entry("devDependencies")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        if let Some(dev_deps_map) = dev_deps_obj.as_object_mut() {
+            for dep in &extra_dev_deps {
+                let (name, version) = if let Some(at_pos) = dep.rfind('@') {
+                    if at_pos == 0 {
+                        (dep.as_str(), "latest")
+                    } else {
+                        (&dep[..at_pos], &dep[at_pos + 1..])
+                    }
+                } else {
+                    (dep.as_str(), "latest")
+                };
+                dev_deps_map
+                    .entry(name)
+                    .or_insert_with(|| serde_json::Value::String(version.to_string()));
+            }
+        }
+    }
+
     // Rewrite scripts to use bun instead of pnpm
     if let Some(scripts) = package.get_mut("scripts").and_then(|s| s.as_object_mut()) {
         let script_keys: Vec<String> = scripts.keys().cloned().collect();

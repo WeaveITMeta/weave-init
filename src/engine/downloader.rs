@@ -58,9 +58,9 @@ pub async fn fetch_template(source: &TemplateSource) -> Result<PathBuf> {
                 None => get_latest_tag().await?,
             };
 
-            // Check cache first
+            // Check cache first (skip cache for "main" — it has no stable version)
             let cached = cache_path(&tag);
-            if cached.exists() {
+            if cached.exists() && tag != "main" {
                 tracing::info!("Using cached template: {}", cached.display());
                 return Ok(cached);
             }

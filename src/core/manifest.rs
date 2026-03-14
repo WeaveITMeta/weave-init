@@ -227,6 +227,42 @@ impl WeaveManifest {
         env_vars
     }
 
+    /// Collect all dependencies to add to root package.json based on selections
+    pub fn collect_dependencies(
+        &self,
+        selections: &HashMap<String, Vec<String>>,
+    ) -> (Vec<String>, Vec<String>) {
+        let mut deps = Vec::new();
+        let mut dev_deps = Vec::new();
+
+        for (category, selected_keys) in selections {
+            let map = match category.as_str() {
+                "platforms" => &self.platforms,
+                "backends" => &self.backends,
+                "auth" => &self.auth,
+                "database" => &self.database,
+                "cloud" => &self.cloud,
+                "microservices" => &self.microservices,
+                "infrastructure" => &self.infrastructure,
+                "extras" => &self.extras,
+                _ => continue,
+            };
+
+            for key in selected_keys {
+                if let Some(entry) = map.get(key) {
+                    deps.extend(entry.dependencies.clone());
+                    dev_deps.extend(entry.dev_dependencies.clone());
+                }
+            }
+        }
+
+        deps.sort();
+        deps.dedup();
+        dev_deps.sort();
+        dev_deps.dedup();
+        (deps, dev_deps)
+    }
+
     /// Collect all Docker service names based on selections
     pub fn collect_docker_services(
         &self,
