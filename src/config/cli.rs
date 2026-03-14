@@ -37,8 +37,9 @@ pub enum Commands {
 /// Arguments for the `weave init` subcommand
 #[derive(Parser, Debug)]
 pub struct InitArgs {
-    /// Name of the project directory to create
-    pub project_name: String,
+    /// Optional project name. If omitted, scaffolds into the current directory
+    /// using the current folder's name as the project name.
+    pub project_name: Option<String>,
 
     /// Path to a local template source directory (for development/testing)
     /// Overrides downloading from GitHub. Also settable via WEAVE_TEMPLATE_PATH.

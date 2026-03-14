@@ -48,23 +48,46 @@ async fn main() -> Result<()> {
 
 /// Execute the `weave init` command.
 /// This launches the interactive wizard, then scaffolds the project.
+///
+/// If a project name is given, creates a new subdirectory.
+/// If omitted, scaffolds into the current working directory (must be empty or nearly empty).
 async fn run_init(args: InitArgs) -> Result<()> {
-    let project_name = args.project_name.clone();
+    let current_dir = std::env::current_dir().context("Failed to determine current directory")?;
 
-    // Determine where to create the project
-    let output_dir = args
-        .output
-        .clone()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let project_dir = output_dir.join(&project_name);
+    let (project_name, project_dir) = if let Some(name) = &args.project_name {
+        // Explicit name: create a new subdirectory
+        let output_dir = args.output.clone().unwrap_or_else(|| current_dir.clone());
+        let dir = output_dir.join(name);
+        if dir.exists() {
+            anyhow::bail!(
+                "Directory '{}' already exists. Choose a different name or remove it first.",
+                dir.display()
+            );
+        }
+        (name.clone(), dir)
+    } else {
+        // No name: scaffold into the current directory
+        let name = current_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "my-project".to_string());
 
-    // Check if project directory already exists
-    if project_dir.exists() {
-        anyhow::bail!(
-            "Directory '{}' already exists. Choose a different name or remove it first.",
-            project_dir.display()
-        );
-    }
+        // Warn if the directory is not empty (ignore hidden files and common config files)
+        let has_content = std::fs::read_dir(&current_dir)?
+            .filter_map(|e| e.ok())
+            .any(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                // Allow common dotfiles that won't conflict
+                !matches!(name.as_str(), ".git" | ".gitignore" | ".env" | ".vscode" | ".idea")
+            });
+        if has_content {
+            eprintln!("Warning: Current directory is not empty. Files may be overwritten.");
+            eprintln!("Press Ctrl+C to cancel, or wait 3 seconds to continue...");
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
+
+        (name, current_dir.clone())
+    };
 
     // Resolve template source (local path or GitHub download)
     let source = downloader::resolve_source(args.source.clone(), args.version.clone());
@@ -90,6 +113,7 @@ async fn run_init(args: InitArgs) -> Result<()> {
     };
 
     // Run the scaffolding process
+    let scaffolded_into_current_directory = args.project_name.is_none();
     println!();
     run_scaffold(
         &template_path,
@@ -98,6 +122,7 @@ async fn run_init(args: InitArgs) -> Result<()> {
         &selections,
         args.skip_install,
         args.skip_git,
+        scaffolded_into_current_directory,
     )?;
 
     Ok(())
@@ -264,11 +289,14 @@ fn run_scaffold(
     selections: &core::selections::UserSelections,
     skip_install: bool,
     skip_git: bool,
+    in_current_directory: bool,
 ) -> Result<()> {
-    // Step 1: Create project directory
-    println!("Creating project directory...");
-    std::fs::create_dir_all(project_dir)
-        .context("Failed to create project directory")?;
+    // Step 1: Ensure project directory exists
+    if !project_dir.exists() {
+        println!("Creating project directory...");
+        std::fs::create_dir_all(project_dir)
+            .context("Failed to create project directory")?;
+    }
 
     // Step 2: Collect keep paths from selections
     let keep_paths = manifest.collect_keep_paths(&selections.selections);
@@ -319,14 +347,18 @@ fn run_scaffold(
     println!("  {}", project_dir.display());
     println!();
     println!("  Next steps:");
-    println!("    1. cd {}", selections.project_name);
-    println!("    2. Copy .env.example to .env and fill in your keys");
-    if skip_install {
-        println!("    3. bun install");
-        println!("    4. bun dev");
-    } else {
-        println!("    3. bun dev");
+    let mut step = 1;
+    if !in_current_directory {
+        println!("    {}. cd {}", step, selections.project_name);
+        step += 1;
     }
+    println!("    {}. Copy .env.example to .env and fill in your keys", step);
+    step += 1;
+    if skip_install {
+        println!("    {}. bun install", step);
+        step += 1;
+    }
+    println!("    {}. bun dev", step);
     println!();
     println!(
         "  Your selections are saved in weave.toml for reproducibility."

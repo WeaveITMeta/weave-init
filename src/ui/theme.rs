@@ -39,8 +39,11 @@ pub const BORDER: Color = Color::Rgb(71, 85, 105);
 /// Active border color (focused panel)
 pub const BORDER_ACTIVE: Color = Color::Rgb(99, 102, 241);
 
-/// Logo color — gradient simulated with a single bright color
+/// Logo color — primary purple for W and A
 pub const LOGO: Color = Color::Rgb(139, 92, 246);
+
+/// Logo accent color — orange for E and V
+pub const LOGO_ACCENT: Color = Color::Rgb(255, 160, 50);
 
 // -- Style Builders ----------------------------------------------------------
 
@@ -102,7 +105,12 @@ pub fn success_style() -> Style {
     Style::default().fg(SUCCESS).add_modifier(Modifier::BOLD)
 }
 
-/// Style for the ASCII logo
+/// Style for the ASCII logo (W and A — purple)
 pub fn logo_style() -> Style {
     Style::default().fg(LOGO).add_modifier(Modifier::BOLD)
+}
+
+/// Style for the ASCII logo accent letters (E and V — orange)
+pub fn logo_accent_style() -> Style {
+    Style::default().fg(LOGO_ACCENT).add_modifier(Modifier::BOLD)
 }
