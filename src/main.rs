@@ -120,7 +120,7 @@ async fn run_init(args: InitArgs) -> Result<()> {
         &project_dir,
         &manifest,
         &selections,
-        args.skip_install,
+        args.install,
         args.skip_git,
         scaffolded_into_current_directory,
     )?;
@@ -287,7 +287,7 @@ fn run_scaffold(
     project_dir: &std::path::Path,
     manifest: &core::manifest::WeaveManifest,
     selections: &core::selections::UserSelections,
-    skip_install: bool,
+    run_install: bool,
     skip_git: bool,
     in_current_directory: bool,
 ) -> Result<()> {
@@ -313,8 +313,8 @@ fn run_scaffold(
     println!("Generating configuration files...");
     generator::post_scaffold(project_dir, manifest, selections, skip_git)?;
 
-    // Step 5: Run bun install (unless skipped)
-    if !skip_install {
+    // Step 5: Run bun install (only if --install flag was passed)
+    if run_install {
         println!("Running bun install...");
         let install_status = std::process::Command::new("bun")
             .arg("install")
@@ -354,7 +354,7 @@ fn run_scaffold(
     }
     println!("    {}. Copy .env.example to .env and fill in your keys", step);
     step += 1;
-    if skip_install {
+    if !run_install {
         println!("    {}. bun install", step);
         step += 1;
     }
