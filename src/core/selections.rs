@@ -73,16 +73,16 @@ impl UserSelections {
     /// Get the selection mode for each wizard category
     pub fn selection_mode_for(category: &str) -> SelectionMode {
         match category {
-            // Single-select categories (pick exactly one)
+            // Single-select: Nexpo OR Taurte paradigm (pick one stack)
             "platforms" => SelectionMode::Single,
-            "backends" => SelectionMode::Single,
 
-            // Optional single-select (pick zero or one)
+            // Optional single-select: only one auth provider needed
             "auth" => SelectionMode::OptionalSingle,
-            "database" => SelectionMode::OptionalSingle,
-            "cloud" => SelectionMode::OptionalSingle,
 
-            // Multi-select categories (pick zero or more)
+            // Multi-select: polyglot backends, multi-database, multi-cloud are all valid
+            "backends" => SelectionMode::Multi,
+            "database" => SelectionMode::Multi,
+            "cloud" => SelectionMode::Multi,
             "microservices" => SelectionMode::Multi,
             "infrastructure" => SelectionMode::Multi,
             "extras" => SelectionMode::Multi,
@@ -152,11 +152,11 @@ pub fn category_display_name(category: &str) -> String {
 /// Convert a category key to a short instruction for the wizard
 pub fn category_instruction(category: &str) -> String {
     match category {
-        "platforms" => "Choose your platform stack".to_string(),
-        "backends" => "Choose your backend API language".to_string(),
+        "platforms" => "Choose your platform stack (pick one)".to_string(),
+        "backends" => "Select backend API languages (polyglot supported)".to_string(),
         "auth" => "Choose an authentication provider (optional)".to_string(),
-        "database" => "Choose a database (optional)".to_string(),
-        "cloud" => "Choose a cloud provider (optional)".to_string(),
+        "database" => "Select databases to include (multi-database supported)".to_string(),
+        "cloud" => "Select cloud providers (multi-cloud supported)".to_string(),
         "microservices" => "Select microservices to include".to_string(),
         "infrastructure" => "Select infrastructure tools to include".to_string(),
         "extras" => "Select additional features".to_string(),

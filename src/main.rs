@@ -193,9 +193,11 @@ fn run_wizard(
 
                             let mode =
                                 core::selections::UserSelections::selection_mode_for(category);
-                            if mode == core::selections::SelectionMode::Single
-                                && selected.is_empty()
-                            {
+
+                            // Require at least one selection for single-select and key multi-select categories
+                            let requires_selection = mode == core::selections::SelectionMode::Single
+                                || category == "backends";
+                            if requires_selection && selected.is_empty() {
                                 continue;
                             }
 
