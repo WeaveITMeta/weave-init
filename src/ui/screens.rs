@@ -41,13 +41,13 @@ pub fn render_welcome_screen(frame: &mut Frame, area: Rect) {
     let orange = theme::logo_accent_style();
     //                  W   E   A   V   E
     // Each tuple: (style, char_count) for segments across each logo line.
-    // Segment boundaries per line:  W(10), E(8), A(8), V(9), E(8)
+    // Segment boundaries per line:  W(11), E(8), A(8), V(9), E(8)
     let segment_styles = [purple, orange, purple, orange, orange];
     let logo_lines: Vec<Line> = constants::LOGO
         .lines()
         .map(|line| {
-            // Character widths per letter column: W=10, E=8, A=8, V=9, E=8
-            let widths = [10, 8, 8, 9, 8];
+            // Character widths per letter column: W=11, E=8, A=8, V=9, E=8
+            let widths = [11, 8, 8, 9, 8];
             let chars: Vec<char> = line.chars().collect();
             let mut spans = Vec::new();
             let mut pos = 0;
