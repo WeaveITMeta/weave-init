@@ -148,13 +148,13 @@ pub fn render_selection_screen(
         false,
     );
 
-    // Key hints
+    // Key hints — vary by selection mode
     let hints = match list_state.mode {
         crate::core::selections::SelectionMode::Single => {
             vec![
                 ("↑↓", "Navigate"),
+                ("Enter", "Select & Continue"),
                 ("Space", "Select"),
-                ("Enter", "Confirm"),
                 ("Esc", "Back"),
                 ("q", "Quit"),
             ]
@@ -163,7 +163,7 @@ pub fn render_selection_screen(
             vec![
                 ("↑↓", "Navigate"),
                 ("Space", "Toggle"),
-                ("Enter", "Confirm"),
+                ("Enter", "Continue (skip if none)"),
                 ("Esc", "Back"),
                 ("q", "Quit"),
             ]
@@ -173,7 +173,7 @@ pub fn render_selection_screen(
                 ("↑↓", "Navigate"),
                 ("Space", "Toggle"),
                 ("a", "Select All"),
-                ("Enter", "Confirm"),
+                ("Enter", "Continue (skip if none)"),
                 ("Esc", "Back"),
                 ("q", "Quit"),
             ]
