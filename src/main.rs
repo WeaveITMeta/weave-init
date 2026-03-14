@@ -189,12 +189,17 @@ fn run_wizard(
                         }
                         crossterm::event::KeyCode::Enter => {
                             let category = &app.categories[index].clone();
-                            let selected = app.list_states[index].selected_keys();
-
                             let mode =
                                 core::selections::UserSelections::selection_mode_for(category);
 
-                            // Require at least one selection for single-select and key multi-select categories
+                            // For single-select, Enter auto-selects the highlighted item
+                            if mode == core::selections::SelectionMode::Single {
+                                app.list_states[index].toggle();
+                            }
+
+                            let selected = app.list_states[index].selected_keys();
+
+                            // Require at least one selection for single-select and backends
                             let requires_selection = mode == core::selections::SelectionMode::Single
                                 || category == "backends";
                             if requires_selection && selected.is_empty() {
